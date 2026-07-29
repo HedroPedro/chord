@@ -1,0 +1,52 @@
+# Chord em Node.js
+
+Implementação didática de um anel Chord com espaço fixo de identificadores `1..32`
+(`m = 5`). Cada nó mantém cinco entradas na finger table e oferece a operação
+`join` por HTTP. Requer Node.js 18 ou superior e não usa pacotes externos.
+
+## Executar
+
+Inicie o painel controlador, que utiliza a porta `5000`:
+
+```bash
+npm start
+```
+
+Abra `http://127.0.0.1:5000`. Na página, informe o ID, IP e porta do novo
+nó. A porta `5000` fica reservada ao painel; utilize `5001`, `5002`, `5003` etc.
+
+Para o primeiro nó, por exemplo:
+
+- ID: `8`
+- IP: `127.0.0.1`
+- Porta de início: `5001`
+- Opção: **Criar um novo anel**
+
+Para o segundo nó, informe seu próprio ID/IP/porta (`20`, `127.0.0.1`, `5002`)
+e selecione **Entrar por um nó existente**. Como destino, informe o nó 8 em
+`127.0.0.1:5001`.
+
+O painel controlador lista todos os nós locais em execução. Use **Abrir painel**
+para ver o predecessor, sucessor, anel e finger table de um nó específico. Por
+exemplo, o painel do nó na porta `5001` estará em
+`http://127.0.0.1:5001`, e seu estado JSON em
+`http://127.0.0.1:5001/api/state`.
+
+Na mesma máquina, os nós compartilham o IP `127.0.0.1`, mas obrigatoriamente
+usam portas diferentes.
+
+## Join
+
+Ao receber `POST /join`, o nó:
+
+1. cria sozinho um novo anel quando `bootstrap` não é informado; ou
+2. pede ao nó de entrada o sucessor de seu próprio ID;
+3. liga-se ao predecessor e ao sucessor encontrados;
+4. calcula as cinco entradas para `n + 1`, `n + 2`, `n + 4`, `n + 8` e `n + 16`.
+5. percorre o anel para atualizar as finger tables dos demais nós.
+
+Execute os testes com:
+
+```bash
+npm test
+```
