@@ -50,3 +50,31 @@ Execute os testes com:
 ```bash
 npm test
 ```
+
+## Arquivos: `put` e `get`
+
+Cada `ChordNode` oferece `put(nome, conteúdo)` e `get(nome)`. O SHA-256 do nome
+é convertido para uma posição entre 1 e 32; `findSuccessor` escolhe o primeiro
+nó ativo nessa posição ou depois dela. Assim, posições sem nó são naturalmente
+armazenadas no próximo nó ativo do anel.
+
+```js
+await node.put('trabalho.txt', Buffer.from('conteúdo'));
+const arquivo = await node.get('trabalho.txt');
+console.log(arquivo.content.toString());
+```
+
+Todo `put` também atualiza `catalogo.txt` (um nome por linha). O catálogo usa o
+mesmo hash e é armazenado na própria rede. Pela API HTTP de qualquer nó:
+
+```bash
+curl -X POST http://127.0.0.1:5001/api/files \
+  -H 'content-type: application/json' \
+  -d '{"name":"trabalho.txt","content":"conteúdo"}'
+
+curl -OJ 'http://127.0.0.1:5001/api/files?name=trabalho.txt'
+curl 'http://127.0.0.1:5001/api/files?name=catalogo.txt'
+```
+
+Para bytes arbitrários, envie `content` em Base64 e acrescente
+`"encoding":"base64"` ao JSON do `POST`.
