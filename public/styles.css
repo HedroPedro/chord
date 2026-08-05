@@ -91,6 +91,19 @@ td:first-child { color: var(--muted); }
 .empty-row { color: var(--muted); text-align: center; }
 .global-error { padding: 12px 15px; border: 1px solid #592b34; border-radius: 10px; background: #241419; margin-top: 18px; }
 .creator-panel, .nodes-panel { padding: 24px; margin-bottom: 18px; }
+.files-panel { margin-top: 18px; padding: 24px; }
+.files-panel .panel-heading p { margin-bottom: 0; }
+.upload-form { display: flex; align-items: center; gap: 12px; padding: 16px; margin-bottom: 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel-2); }
+.file-picker { flex: 0 0 auto; padding: 9px 13px; border: 1px solid var(--border); border-radius: 9px; cursor: pointer; font-weight: 700; }
+.file-picker:hover { border-color: var(--accent); }
+.file-picker input { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.upload-form > .muted { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.catalog-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+.catalog-file { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 11px; padding: 13px; color: var(--text); text-decoration: none; border: 1px solid var(--border); border-radius: 11px; background: var(--panel-2); transition: .18s ease; }
+.catalog-file:hover { border-color: var(--accent); transform: translateY(-1px); }
+.catalog-file > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.catalog-file small { color: var(--accent); font-weight: 700; }
+.file-icon { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; color: var(--accent); background: var(--accent-dark); font-weight: 900; }
 .creator-panel { display: grid; grid-template-columns: .7fr 1.3fr; gap: 36px; border-color: #345947; }
 .node-fields { margin-bottom: 18px; }
 .nodes-list { display: grid; gap: 10px; }
@@ -114,6 +127,9 @@ td:first-child { color: var(--muted); }
   .stat-card { padding: 15px; }
   .form-grid { grid-template-columns: 1fr; }
   .ring-panel, .table-panel, .join-panel { padding: 18px; }
+  .files-panel { padding: 18px; }
+  .upload-form { align-items: stretch; flex-direction: column; }
+  .upload-form .button { width: 100%; }
   .node-card { grid-template-columns: auto 1fr; }
   .node-links { display: none; }
   .ring { --ring-radius: min(42vw, 145px); }
