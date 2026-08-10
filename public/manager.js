@@ -6,6 +6,7 @@ const button = document.querySelector('#create-button');
 const message = document.querySelector('#create-message');
 const list = document.querySelector('#nodes-list');
 
+<<<<<<< HEAD
 async function fillNetworkDefaults() {
   try {
     const response = await fetch('/api/network', { cache: 'no-store' });
@@ -19,6 +20,8 @@ async function fillNetworkDefaults() {
   }
 }
 
+=======
+>>>>>>> 8b2078c48ec03d9accffe5aae6fe5f27d2b2a301
 document.querySelectorAll('input[name="mode"]').forEach((radio) => {
   radio.addEventListener('change', () => {
     targetFields.hidden = document.querySelector('input[name="mode"]:checked').value !== 'join';
@@ -94,6 +97,9 @@ form.addEventListener('submit', async (event) => {
 });
 
 document.querySelector('#refresh-button').addEventListener('click', loadNodes);
+<<<<<<< HEAD
 fillNetworkDefaults();
+=======
+>>>>>>> 8b2078c48ec03d9accffe5aae6fe5f27d2b2a301
 loadNodes();
 setInterval(loadNodes, 5000);

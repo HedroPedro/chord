@@ -35,6 +35,7 @@ exemplo, o painel do nó na porta `5001` estará em
 Na mesma máquina, os nós compartilham o IP `127.0.0.1`, mas obrigatoriamente
 usam portas diferentes.
 
+<<<<<<< HEAD
 ### Executar em máquinas da rede local
 
 Em cada máquina, execute `npm start` e abra o painel usando o IP da própria
@@ -53,6 +54,8 @@ nós (`5001`, `5002` etc.). Confirme a comunicação de outra máquina com:
 curl http://172.16.1.10:5001/api/state
 ```
 
+=======
+>>>>>>> 8b2078c48ec03d9accffe5aae6fe5f27d2b2a301
 ## Join
 
 Ao receber `POST /join`, o nó:
