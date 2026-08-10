@@ -1,16 +1,26 @@
 'use strict';
 
-const { FINGER_COUNT, add, inInterval, validateId } = require('./ring');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const { FINGER_COUNT, add, hashKey, inInterval, validateId } = require('./ring');
+
+const CATALOG_NAME = 'catalogo.txt';
 
 class ChordNode {
-  constructor({ id, host = '127.0.0.1', port = 5000, requestTimeout = 3000 }) {
+  constructor({ id, host = '127.0.0.1', port = 5000, requestTimeout = 3000,
+    storageDirectory } = {}) {
     this.id = validateId(id);
-    this.host = host;
+    this.host = String(host || '').trim();
+    if (!this.host || this.host === '0.0.0.0' || this.host === '::') {
+      throw new Error('Informe o IP ou hostname pelo qual os outros nós acessam esta máquina');
+    }
     this.port = Number(port);
     if (!Number.isInteger(this.port) || this.port < 1 || this.port > 65535) {
       throw new Error('A porta deve ser um inteiro entre 1 e 65535');
     }
     this.requestTimeout = requestTimeout;
+    this.storageDirectory = storageDirectory || path.join(
+      process.cwd(), 'data', `node-${this.id}-${this.port}`);
     this.predecessor = null;
     this.fingers = this.buildEmptyFingerTable();
     this.joined = false;
@@ -146,6 +156,83 @@ class ChordNode {
     return this.reference;
   }
 
+  /** Insere bytes na rede e devolve a posição do hash e o nó responsável. */
+  async put(fileName, content, { updateCatalog = true } = {}) {
+    this.assertJoined();
+    const name = validateFileName(fileName);
+    const bytes = Buffer.isBuffer(content) ? content : Buffer.from(content);
+    const hashId = hashKey(name);
+    const owner = await this.findSuccessor(hashId);
+
+    if (owner.id === this.id) {
+      await this.storeLocal(name, bytes);
+    } else {
+      await this.rpc(owner, '/rpc/files', {
+        method: 'PUT',
+        body: { name, content: bytes.toString('base64') }
+      });
+    }
+
+    if (updateCatalog && name !== CATALOG_NAME) await this.addToCatalog(name);
+    return { name, hashId, node: owner, size: bytes.length };
+  }
+
+  /** Busca os bytes de um arquivo a partir de qualquer nó da rede. */
+  async get(fileName) {
+    this.assertJoined();
+    const name = validateFileName(fileName);
+    const hashId = hashKey(name);
+    const owner = await this.findSuccessor(hashId);
+    let content;
+
+    if (owner.id === this.id) {
+      content = await this.readLocal(name);
+    } else {
+      const result = await this.rpc(owner, `/rpc/files?name=${encodeURIComponent(name)}`);
+      content = Buffer.from(result.content, 'base64');
+    }
+    return { name, hashId, node: owner, size: content.length, content };
+  }
+
+  async addToCatalog(fileName) {
+    let names = [];
+    try {
+      const catalog = await this.get(CATALOG_NAME);
+      names = catalog.content.toString('utf8').split(/\r?\n/).filter(Boolean);
+    } catch (error) {
+      if (error.code !== 'ENOENT' && !/não encontrado/i.test(error.message)) throw error;
+    }
+    if (!names.includes(fileName)) names.push(fileName);
+    names.sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    await this.put(CATALOG_NAME, Buffer.from(`${names.join('\n')}\n`), {
+      updateCatalog: false
+    });
+  }
+
+  async storeLocal(fileName, content) {
+    const name = validateFileName(fileName);
+    await fs.mkdir(this.storageDirectory, { recursive: true });
+    await fs.writeFile(path.join(this.storageDirectory, name), content);
+  }
+
+  async readLocal(fileName) {
+    const name = validateFileName(fileName);
+    try {
+      return await fs.readFile(path.join(this.storageDirectory, name));
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        const notFound = new Error(`Arquivo "${name}" não encontrado na rede`);
+        notFound.code = 'ENOENT';
+        throw notFound;
+      }
+      throw error;
+    }
+  }
+
+  assertJoined() {
+    if (!this.joined) throw new Error('O nó ainda não entrou em uma rede');
+  }
+
   async rpc(node, path, { method = 'GET', body } = {}) {
     const target = normalizeReference(node);
     const controller = new AbortController();
@@ -176,6 +263,18 @@ class ChordNode {
   }
 }
 
+function validateFileName(fileName) {
+  if (typeof fileName !== 'string' || !fileName.trim()) {
+    throw new Error('O nome do arquivo é obrigatório');
+  }
+  const name = fileName.trim();
+  if (name === '.' || name === '..' || path.basename(name) !== name
+    || name.includes('/') || name.includes('\\') || name.includes('\0')) {
+    throw new Error('Nome de arquivo inválido');
+  }
+  return name;
+}
+
 function normalizeReference(node) {
   if (!node || typeof node !== 'object') throw new Error('Referência de nó inválida');
   return {
@@ -185,4 +284,4 @@ function normalizeReference(node) {
   };
 }
 
-module.exports = { ChordNode, normalizeReference };
+module.exports = { ChordNode, normalizeReference, validateFileName, CATALOG_NAME };

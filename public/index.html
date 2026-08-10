@@ -109,6 +109,31 @@
       </section>
     </div>
 
+    <section id="files-panel" class="panel files-panel" hidden>
+      <div class="panel-heading">
+        <div>
+          <p class="eyebrow">Armazenamento distribuído</p>
+          <h2>Arquivos da rede</h2>
+          <p class="muted">Clique em um arquivo para buscá-lo no Chord e fazer o download.</p>
+        </div>
+        <button id="files-refresh-button" class="button secondary" type="button">Atualizar lista</button>
+      </div>
+
+      <form id="upload-form" class="upload-form">
+        <label class="file-picker">
+          <span>Escolher arquivo</span>
+          <input id="upload-file" type="file" required>
+        </label>
+        <span id="selected-file" class="muted">Nenhum arquivo selecionado</span>
+        <button id="upload-button" class="button primary" type="submit">Fazer upload</button>
+        <p id="upload-message" class="form-message" role="status"></p>
+      </form>
+
+      <div id="catalog-list" class="catalog-list" aria-live="polite">
+        <p class="empty-row">Carregando catálogo…</p>
+      </div>
+    </section>
+
     <p id="global-error" class="global-error" role="alert" hidden></p>
   </main>
   <script src="/app.js" defer></script>

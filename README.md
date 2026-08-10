@@ -35,6 +35,24 @@ exemplo, o painel do nó na porta `5001` estará em
 Na mesma máquina, os nós compartilham o IP `127.0.0.1`, mas obrigatoriamente
 usam portas diferentes.
 
+### Executar em máquinas da rede local
+
+Em cada máquina, execute `npm start` e abra o painel usando o IP da própria
+máquina, por exemplo `http://172.16.1.10:5000`. O servidor escuta em todas as
+interfaces e o painel preenche automaticamente o campo **IP desta máquina**.
+
+Na primeira máquina, crie um novo anel. Nas demais, escolha **Entrar por um nó
+existente** e informe o ID, IP e porta do primeiro nó (por exemplo,
+`1`, `172.16.1.10`, `5001`). Cada nó deve anunciar o IP `172.16.X.X` da máquina
+em que está executando, nunca `127.0.0.1` ou `0.0.0.0`.
+
+Libere no firewall TCP a porta `5000` para o painel e as portas usadas pelos
+nós (`5001`, `5002` etc.). Confirme a comunicação de outra máquina com:
+
+```bash
+curl http://172.16.1.10:5001/api/state
+```
+
 ## Join
 
 Ao receber `POST /join`, o nó:
@@ -50,3 +68,31 @@ Execute os testes com:
 ```bash
 npm test
 ```
+
+## Arquivos: `put` e `get`
+
+Cada `ChordNode` oferece `put(nome, conteúdo)` e `get(nome)`. O SHA-256 do nome
+é convertido para uma posição entre 1 e 32; `findSuccessor` escolhe o primeiro
+nó ativo nessa posição ou depois dela. Assim, posições sem nó são naturalmente
+armazenadas no próximo nó ativo do anel.
+
+```js
+await node.put('trabalho.txt', Buffer.from('conteúdo'));
+const arquivo = await node.get('trabalho.txt');
+console.log(arquivo.content.toString());
+```
+
+Todo `put` também atualiza `catalogo.txt` (um nome por linha). O catálogo usa o
+mesmo hash e é armazenado na própria rede. Pela API HTTP de qualquer nó:
+
+```bash
+curl -X POST http://127.0.0.1:5001/api/files \
+  -H 'content-type: application/json' \
+  -d '{"name":"trabalho.txt","content":"conteúdo"}'
+
+curl -OJ 'http://127.0.0.1:5001/api/files?name=trabalho.txt'
+curl 'http://127.0.0.1:5001/api/files?name=catalogo.txt'
+```
+
+Para bytes arbitrários, envie `content` em Base64 e acrescente
+`"encoding":"base64"` ao JSON do `POST`.

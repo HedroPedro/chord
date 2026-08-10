@@ -41,6 +41,24 @@ async function handleNodeRequest(node, request, response) {
     if (request.method === 'GET' && url.pathname === '/api/state') {
       return json(response, 200, node.state());
     }
+    if (request.method === 'POST' && url.pathname === '/api/files') {
+      const body = await readJson(request);
+      if (body.name === 'catalogo.txt') {
+        throw new Error('catalogo.txt é reservado para o controle da rede');
+      }
+      const content = Buffer.from(body.content || '', body.encoding === 'base64' ? 'base64' : 'utf8');
+      return json(response, 201, await node.put(body.name, content));
+    }
+    if (request.method === 'GET' && url.pathname === '/api/files') {
+      const result = await node.get(url.searchParams.get('name'));
+      response.writeHead(200, {
+        'content-type': 'application/octet-stream',
+        'content-disposition': `attachment; filename="${encodeURIComponent(result.name)}"`,
+        'x-chord-hash-id': String(result.hashId),
+        'x-chord-node-id': String(result.node.id)
+      });
+      return response.end(result.content);
+    }
     if (request.method === 'POST' && url.pathname === '/join') {
       const { bootstrap = null } = await readJson(request);
       return json(response, 200, await node.join(bootstrap));
@@ -65,9 +83,20 @@ async function handleNodeRequest(node, request, response) {
       return json(response, 200,
         await node.refreshRingFingerTables(body.originId, body.hops || 0));
     }
+    if (request.method === 'PUT' && url.pathname === '/rpc/files') {
+      const body = await readJson(request);
+      const content = Buffer.from(body.content || '', 'base64');
+      await node.storeLocal(body.name, content);
+      return json(response, 200, { ok: true, size: content.length });
+    }
+    if (request.method === 'GET' && url.pathname === '/rpc/files') {
+      const name = url.searchParams.get('name');
+      const content = await node.readLocal(name);
+      return json(response, 200, { name, content: content.toString('base64') });
+    }
     return json(response, 404, { error: 'Rota não encontrada' });
   } catch (error) {
-    const status = error.name === 'AbortError' ? 504 : 400;
+    const status = error.name === 'AbortError' ? 504 : error.code === 'ENOENT' ? 404 : 400;
     return json(response, status, { error: error.message });
   }
 }

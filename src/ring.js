@@ -1,5 +1,7 @@
 'use strict';
 
+const crypto = require('node:crypto');
+
 const RING_SIZE = 32;
 const FINGER_COUNT = 5;
 
@@ -23,6 +25,15 @@ function fromRing(value) {
 
 function add(id, offset) {
   return fromRing(toRing(id) + offset);
+}
+
+// Mapeia uma chave para uma das 32 posições do anel público (1..32).
+function hashKey(key) {
+  if (typeof key !== 'string' || key.length === 0) {
+    throw new Error('A chave deve ser uma string não vazia');
+  }
+  const digest = crypto.createHash('sha256').update(key, 'utf8').digest();
+  return (digest.readUInt32BE(0) % RING_SIZE) + 1;
 }
 
 // Intervalo circular. Ex.: (30, 3] contém 31, 32, 1, 2 e 3.
@@ -51,5 +62,6 @@ module.exports = {
   FINGER_COUNT,
   validateId,
   add,
-  inInterval
+  inInterval,
+  hashKey
 };

@@ -20,10 +20,19 @@ const elements = {
   joinMessage: document.querySelector('#join-message'),
   bootstrapFields: document.querySelector('#bootstrap-fields'),
   globalError: document.querySelector('#global-error'),
-  refreshButton: document.querySelector('#refresh-button')
+  refreshButton: document.querySelector('#refresh-button'),
+  filesPanel: document.querySelector('#files-panel'),
+  filesRefreshButton: document.querySelector('#files-refresh-button'),
+  catalogList: document.querySelector('#catalog-list'),
+  uploadForm: document.querySelector('#upload-form'),
+  uploadFile: document.querySelector('#upload-file'),
+  selectedFile: document.querySelector('#selected-file'),
+  uploadButton: document.querySelector('#upload-button'),
+  uploadMessage: document.querySelector('#upload-message')
 };
 
 let refreshing = false;
+let catalogRefreshing = false;
 
 function address(node) {
   return node ? `${node.host}:${node.port}` : 'Não definido';
@@ -84,11 +93,70 @@ function render(state) {
   elements.joinedLabel.textContent = state.joined ? 'No anel' : 'Fora do anel';
   elements.joinedLabel.classList.toggle('active', state.joined);
   elements.joinPanel.hidden = state.joined;
+  elements.filesPanel.hidden = !state.joined;
   renderNode(elements.predecessorId, elements.predecessorAddress, state.predecessor);
   renderNode(elements.successorId, elements.successorAddress, state.successor);
   renderTable(state.fingerTable);
   renderRing(state);
   elements.lastUpdate.textContent = `Atualizado às ${new Date().toLocaleTimeString('pt-BR')}`;
+}
+
+function renderCatalog(names) {
+  if (names.length === 0) {
+    elements.catalogList.innerHTML = '<p class="empty-row">Nenhum arquivo foi inserido na rede.</p>';
+    return;
+  }
+
+  elements.catalogList.replaceChildren(...names.map((name) => {
+    const link = document.createElement('a');
+    link.className = 'catalog-file';
+    link.href = `/api/files?name=${encodeURIComponent(name)}`;
+    link.download = name;
+
+    const icon = document.createElement('span');
+    icon.className = 'file-icon';
+    icon.textContent = '↓';
+    const label = document.createElement('span');
+    label.textContent = name;
+    const action = document.createElement('small');
+    action.textContent = 'Baixar';
+    link.append(icon, label, action);
+    return link;
+  }));
+}
+
+async function refreshCatalog() {
+  if (catalogRefreshing || elements.filesPanel.hidden) return;
+  catalogRefreshing = true;
+  try {
+    const response = await fetch('/api/files?name=catalogo.txt', { cache: 'no-store' });
+    if (response.status === 404) {
+      renderCatalog([]);
+      return;
+    }
+    if (!response.ok) throw new Error(`Falha HTTP ${response.status}`);
+    const names = (await response.text()).split(/\r?\n/).filter(Boolean);
+    renderCatalog(names);
+  } catch (error) {
+    elements.catalogList.innerHTML = `<p class="global-error">Não foi possível carregar o catálogo: ${escapeHtml(error.message)}</p>`;
+  } finally {
+    catalogRefreshing = false;
+  }
+}
+
+function escapeHtml(value) {
+  const element = document.createElement('span');
+  element.textContent = value;
+  return element.innerHTML;
+}
+
+function fileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener('load', () => resolve(String(reader.result).split(',', 2)[1] || ''));
+    reader.addEventListener('error', () => reject(reader.error || new Error('Não foi possível ler o arquivo')));
+    reader.readAsDataURL(file);
+  });
 }
 
 async function refresh() {
@@ -98,6 +166,7 @@ async function refresh() {
     const response = await fetch('/api/state', { cache: 'no-store' });
     if (!response.ok) throw new Error(`Falha HTTP ${response.status}`);
     render(await response.json());
+    refreshCatalog();
     elements.connectionDot.classList.add('online');
     elements.connectionLabel.textContent = 'Nó acessível';
     elements.globalError.hidden = true;
@@ -151,5 +220,44 @@ elements.joinForm.addEventListener('submit', async (event) => {
 });
 
 elements.refreshButton.addEventListener('click', refresh);
+elements.filesRefreshButton.addEventListener('click', refreshCatalog);
+elements.uploadFile.addEventListener('change', () => {
+  elements.selectedFile.textContent = elements.uploadFile.files[0]?.name
+    || 'Nenhum arquivo selecionado';
+});
+elements.uploadForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const file = elements.uploadFile.files[0];
+  if (!file) return;
+
+  elements.uploadButton.disabled = true;
+  elements.uploadMessage.className = 'form-message';
+  elements.uploadMessage.textContent = 'Enviando…';
+  try {
+    const response = await fetch('/api/files', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: file.name,
+        content: await fileAsBase64(file),
+        encoding: 'base64'
+      })
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Não foi possível enviar o arquivo');
+    elements.uploadMessage.textContent = `Arquivo armazenado pelo nó ${result.node.id} (hash ${result.hashId}).`;
+    elements.uploadForm.reset();
+    elements.selectedFile.textContent = 'Nenhum arquivo selecionado';
+    await refreshCatalog();
+  } catch (error) {
+    elements.uploadMessage.className = 'form-message error';
+    elements.uploadMessage.textContent = error.message;
+  } finally {
+    elements.uploadButton.disabled = false;
+  }
+});
 refresh();
-setInterval(refresh, 5000);
+setInterval(() => {
+  refresh();
+  refreshCatalog();
+}, 5000);
