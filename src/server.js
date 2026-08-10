@@ -5,6 +5,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { URL } = require('node:url');
 const { startNodeServer } = require('./node-server');
+const { start } = require('node:repl');
 
 const CONTROL_PORT = Number(process.env.PORT || 5000);
 const PUBLIC_DIRECTORY = path.join(__dirname, '..', 'public');
@@ -15,6 +16,16 @@ const STATIC_FILES = {
   '/manager.js': ['manager.js', 'text/javascript; charset=utf-8'],
   '/styles.css': ['styles.css', 'text/css; charset=utf-8']
 };
+
+(async() => {
+  try {
+    const stat = await fs.stat('data');
+    if(stat)
+      await fs.rm('data', {recursive: true});
+  } catch(err) {
+
+  }
+})()
 
 const server = http.createServer(async (request, response) => {
   try {
