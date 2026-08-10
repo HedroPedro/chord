@@ -1,10 +1,7 @@
 'use strict';
 
 const http = require('node:http');
-<<<<<<< HEAD
 const os = require('node:os');
-=======
->>>>>>> 8b2078c48ec03d9accffe5aae6fe5f27d2b2a301
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { URL } = require('node:url');
@@ -31,7 +28,6 @@ const server = http.createServer(async (request, response) => {
     if (request.method === 'GET' && url.pathname === '/api/nodes') {
       return json(response, 200, Array.from(nodes.values(), ({ node }) => node.state()));
     }
-<<<<<<< HEAD
     if (request.method === 'GET' && url.pathname === '/api/network') {
       const addresses = localIPv4Addresses();
       const requestedHost = request.headers.host?.replace(/:\d+$/, '');
@@ -41,8 +37,6 @@ const server = http.createServer(async (request, response) => {
         suggestedHost: suggestedHost || addresses[0] || '127.0.0.1'
       });
     }
-=======
->>>>>>> 8b2078c48ec03d9accffe5aae6fe5f27d2b2a301
     if (request.method === 'POST' && url.pathname === '/api/nodes') {
       const body = await readJson(request);
       const port = Number(body.port);
@@ -75,7 +69,6 @@ const server = http.createServer(async (request, response) => {
 });
 
 server.listen(CONTROL_PORT, '0.0.0.0', () => {
-<<<<<<< HEAD
   const addresses = localIPv4Addresses();
   console.log(`Painel Chord local: http://127.0.0.1:${CONTROL_PORT}`);
   for (const address of addresses) {
@@ -96,11 +89,6 @@ function isLoopback(host) {
   return !host || host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
 }
 
-=======
-  console.log(`Painel Chord disponível em http://127.0.0.1:${CONTROL_PORT}`);
-});
-
->>>>>>> 8b2078c48ec03d9accffe5aae6fe5f27d2b2a301
 function json(response, status, value) {
   response.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
   response.end(JSON.stringify(value, null, 2));
