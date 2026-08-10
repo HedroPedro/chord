@@ -10,7 +10,10 @@ class ChordNode {
   constructor({ id, host = '127.0.0.1', port = 5000, requestTimeout = 3000,
     storageDirectory } = {}) {
     this.id = validateId(id);
-    this.host = host;
+    this.host = String(host || '').trim();
+    if (!this.host || this.host === '0.0.0.0' || this.host === '::') {
+      throw new Error('Informe o IP ou hostname pelo qual os outros nós acessam esta máquina');
+    }
     this.port = Number(port);
     if (!Number.isInteger(this.port) || this.port < 1 || this.port > 65535) {
       throw new Error('A porta deve ser um inteiro entre 1 e 65535');

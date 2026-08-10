@@ -6,6 +6,19 @@ const button = document.querySelector('#create-button');
 const message = document.querySelector('#create-message');
 const list = document.querySelector('#nodes-list');
 
+async function fillNetworkDefaults() {
+  try {
+    const response = await fetch('/api/network', { cache: 'no-store' });
+    if (!response.ok) return;
+    const { suggestedHost } = await response.json();
+    if (!suggestedHost) return;
+    document.querySelector('#node-host').value = suggestedHost;
+    document.querySelector('#target-host').value = suggestedHost;
+  } catch {
+    // Mantém 127.0.0.1 como fallback quando a interface não puder ser detectada.
+  }
+}
+
 document.querySelectorAll('input[name="mode"]').forEach((radio) => {
   radio.addEventListener('change', () => {
     targetFields.hidden = document.querySelector('input[name="mode"]:checked').value !== 'join';
@@ -81,5 +94,6 @@ form.addEventListener('submit', async (event) => {
 });
 
 document.querySelector('#refresh-button').addEventListener('click', loadNodes);
+fillNetworkDefaults();
 loadNodes();
 setInterval(loadNodes, 5000);

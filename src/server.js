@@ -1,6 +1,7 @@
 'use strict';
 
 const http = require('node:http');
+const os = require('node:os');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { URL } = require('node:url');
@@ -38,6 +39,15 @@ const server = http.createServer(async (request, response) => {
     if (request.method === 'GET' && url.pathname === '/api/nodes') {
       return json(response, 200, Array.from(nodes.values(), ({ node }) => node.state()));
     }
+    if (request.method === 'GET' && url.pathname === '/api/network') {
+      const addresses = localIPv4Addresses();
+      const requestedHost = request.headers.host?.replace(/:\d+$/, '');
+      const suggestedHost = isLoopback(requestedHost) ? addresses[0] : requestedHost;
+      return json(response, 200, {
+        addresses,
+        suggestedHost: suggestedHost || addresses[0] || '127.0.0.1'
+      });
+    }
     if (request.method === 'POST' && url.pathname === '/api/nodes') {
       const body = await readJson(request);
       const port = Number(body.port);
@@ -70,8 +80,25 @@ const server = http.createServer(async (request, response) => {
 });
 
 server.listen(CONTROL_PORT, '0.0.0.0', () => {
-  console.log(`Painel Chord disponível em http://127.0.0.1:${CONTROL_PORT}`);
+  const addresses = localIPv4Addresses();
+  console.log(`Painel Chord local: http://127.0.0.1:${CONTROL_PORT}`);
+  for (const address of addresses) {
+    console.log(`Painel Chord na rede: http://${address}:${CONTROL_PORT}`);
+  }
 });
+
+function localIPv4Addresses() {
+  return Object.values(os.networkInterfaces())
+    .flat()
+    .filter((entry) => entry && entry.family === 'IPv4' && !entry.internal)
+    .map((entry) => entry.address)
+    .sort((left, right) => Number(!left.startsWith('172.16.'))
+      - Number(!right.startsWith('172.16.')));
+}
+
+function isLoopback(host) {
+  return !host || host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
+}
 
 function json(response, status, value) {
   response.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });

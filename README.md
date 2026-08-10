@@ -35,6 +35,27 @@ exemplo, o painel do nó na porta `5001` estará em
 Na mesma máquina, os nós compartilham o IP `127.0.0.1`, mas obrigatoriamente
 usam portas diferentes.
 
+<<<<<<< HEAD
+### Executar em máquinas da rede local
+
+Em cada máquina, execute `npm start` e abra o painel usando o IP da própria
+máquina, por exemplo `http://172.16.1.10:5000`. O servidor escuta em todas as
+interfaces e o painel preenche automaticamente o campo **IP desta máquina**.
+
+Na primeira máquina, crie um novo anel. Nas demais, escolha **Entrar por um nó
+existente** e informe o ID, IP e porta do primeiro nó (por exemplo,
+`1`, `172.16.1.10`, `5001`). Cada nó deve anunciar o IP `172.16.X.X` da máquina
+em que está executando, nunca `127.0.0.1` ou `0.0.0.0`.
+
+Libere no firewall TCP a porta `5000` para o painel e as portas usadas pelos
+nós (`5001`, `5002` etc.). Confirme a comunicação de outra máquina com:
+
+```bash
+curl http://172.16.1.10:5001/api/state
+```
+
+=======
+>>>>>>> 8b2078c48ec03d9accffe5aae6fe5f27d2b2a301
 ## Join
 
 Ao receber `POST /join`, o nó:
