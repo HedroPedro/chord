@@ -2,13 +2,16 @@
 
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { FINGER_COUNT, add, hashKey, inInterval, validateId } = require('./ring');
 
 const CATALOG_NAME = 'catalogo.txt';
+const META_DIR_NAME = '.chord-meta';
+const DEFAULT_REPLICATION_FACTOR = 3;
 
 class ChordNode {
   constructor({ id, host = '127.0.0.1', port = 5000, requestTimeout = 3000,
-    storageDirectory } = {}) {
+    storageDirectory, replicationFactor = DEFAULT_REPLICATION_FACTOR } = {}) {
     this.id = validateId(id);
     this.host = String(host || '').trim();
     if (!this.host || this.host === '0.0.0.0' || this.host === '::') {
@@ -21,6 +24,8 @@ class ChordNode {
     this.requestTimeout = requestTimeout;
     this.storageDirectory = storageDirectory || path.join(
       process.cwd(), 'data', `node-${this.id}-${this.port}`);
+    // Número total de cópias do arquivo na rede (dono + réplicas nos sucessores).
+    this.replicationFactor = Math.max(1, Number(replicationFactor) || 1);
     this.predecessor = null;
     this.fingers = this.buildEmptyFingerTable();
     this.joined = false;
@@ -28,6 +33,10 @@ class ChordNode {
 
   get reference() {
     return { id: this.id, host: this.host, port: this.port };
+  }
+
+  get metaDirectory() {
+    return path.join(this.storageDirectory, META_DIR_NAME);
   }
 
   buildEmptyFingerTable() {
@@ -109,6 +118,14 @@ class ChordNode {
     for (const finger of this.fingers) {
       finger.node = await this.findSuccessor(finger.start);
     }
+    // A cada atualização da finger table, garante que os arquivos deste nó
+    // continuam replicados nos sucessores corretos e que as réplicas locais
+    // ainda fazem sentido na topologia atual.
+    try {
+      await this.verifyReplicas();
+    } catch (error) {
+      console.error(`[node ${this.id}] falha ao verificar réplicas: ${error.message}`);
+    }
   }
 
   async refreshRingFingerTables(originId, hops = 0) {
@@ -156,6 +173,39 @@ class ChordNode {
     return this.reference;
   }
 
+  /**
+   * Percorre a cadeia de sucessores (fingers[0] encadeado) a partir de
+   * `fromNode` (por padrão, este próprio nó) e devolve até `n` nós,
+   * sem incluir `fromNode`. Usado tanto para decidir para onde replicar
+   * quanto para verificar se este nó ainda deveria guardar uma réplica.
+   */
+  async getSuccessorList(n, fromNode = this.reference) {
+    const list = [];
+    if (n <= 0) return list;
+
+    let current;
+    if (fromNode.id === this.id) {
+      current = this.successor;
+    } else {
+      const result = await this.rpc(fromNode, '/rpc/successor');
+      current = result.node;
+    }
+
+    const seen = new Set();
+    while (current && current.id !== fromNode.id && !seen.has(current.id) && list.length < n) {
+      list.push(current);
+      seen.add(current.id);
+      let next;
+      try {
+        next = (await this.rpc(current, '/rpc/successor')).node;
+      } catch (error) {
+        break; // nó inacessível: devolve a lista parcial obtida até aqui.
+      }
+      current = next;
+    }
+    return list;
+  }
+
   /** Insere bytes na rede e devolve a posição do hash e o nó responsável. */
   async put(fileName, content, { updateCatalog = true } = {}) {
     this.assertJoined();
@@ -165,7 +215,7 @@ class ChordNode {
     const owner = await this.findSuccessor(hashId);
 
     if (owner.id === this.id) {
-      await this.storeLocal(name, bytes);
+      await this.acceptOwnership(name, bytes);
     } else {
       await this.rpc(owner, '/rpc/files', {
         method: 'PUT',
@@ -185,13 +235,186 @@ class ChordNode {
     const owner = await this.findSuccessor(hashId);
     let content;
 
-    if (owner.id === this.id) {
-      content = await this.readLocal(name);
-    } else {
-      const result = await this.rpc(owner, `/rpc/files?name=${encodeURIComponent(name)}`);
-      content = Buffer.from(result.content, 'base64');
+    try {
+      if (owner.id === this.id) {
+        content = await this.readLocal(name);
+      } else {
+        const result = await this.rpc(owner, `/rpc/files?name=${encodeURIComponent(name)}`);
+        content = Buffer.from(result.content, 'base64');
+      }
+    } catch (error) {
+      if (error.code === 'ENOENT') throw error;
+      // Dono indisponível no momento: tenta servir a partir de uma réplica conhecida.
+      const fallback = await this.readFromReplica(name, owner);
+      if (!fallback) throw error;
+      content = fallback;
     }
     return { name, hashId, node: owner, size: content.length, content };
+  }
+
+  /** Grava localmente como dono e propaga cópias para os sucessores. */
+  async acceptOwnership(fileName, bytes) {
+    await this.storeLocal(fileName, bytes, { role: 'owner', ownerId: this.id });
+    await this.replicateToSuccessors(fileName, bytes, this.id);
+  }
+
+  /** Empurra o conteúdo para os (replicationFactor - 1) sucessores mais próximos. */
+  async replicateToSuccessors(fileName, bytes, ownerId) {
+    const name = validateFileName(fileName);
+    const count = Math.max(0, this.replicationFactor - 1);
+    if (count === 0) return [];
+
+    const targets = await this.getSuccessorList(count);
+    const results = [];
+    for (const target of targets) {
+      if (target.id === ownerId) continue;
+      try {
+        await this.rpc(target, '/rpc/replicas', {
+          method: 'PUT',
+          body: { name, ownerId, content: bytes.toString('base64') }
+        });
+        results.push({ node: target, ok: true });
+      } catch (error) {
+        // Nó indisponível agora: será reparado no próximo verifyReplicas().
+        results.push({ node: target, ok: false, error: error.message });
+      }
+    }
+    return results;
+  }
+
+  /** Tenta ler o conteúdo a partir de uma das réplicas do dono informado. */
+  async readFromReplica(fileName, owner) {
+    const name = validateFileName(fileName);
+    const count = Math.max(0, this.replicationFactor - 1);
+    if (count === 0) return null;
+
+    let targets;
+    try {
+      targets = await this.getSuccessorList(count, owner);
+    } catch (error) {
+      return null;
+    }
+
+    for (const target of targets) {
+      try {
+        if (target.id === this.id) {
+          return await this.readLocal(name);
+        }
+        const result = await this.rpc(target, `/rpc/replicas?name=${encodeURIComponent(name)}`);
+        return Buffer.from(result.content, 'base64');
+      } catch (error) {
+        continue; // tenta a próxima réplica candidata
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Percorre os arquivos guardados localmente e:
+   *  - para os arquivos dos quais este nó é dono, garante que os sucessores
+   *    atuais têm cópia (repara buracos deixados por entradas/saídas de nós);
+   *  - para as réplicas guardadas por conta de outro dono, confirma que o
+   *    dono e a posição deste nó na cadeia de sucessores continuam válidos,
+   *    ressincronizando ou descartando a réplica quando necessário.
+   */
+  async verifyReplicas() {
+    if (!this.joined) return;
+    const entries = await this.listLocalMeta();
+    for (const entry of entries) {
+      try {
+        if (entry.role === 'owner') {
+          await this.verifyOwnedFile(entry.name);
+        } else if (entry.role === 'replica') {
+          await this.verifyReplicaFile(entry.name);
+        }
+      } catch (error) {
+        console.error(`[node ${this.id}] falha ao verificar "${entry.name}": ${error.message}`);
+      }
+    }
+  }
+
+  async verifyOwnedFile(fileName) {
+    const name = validateFileName(fileName);
+    const meta = await this.readMeta(name);
+    if (!meta || meta.role !== 'owner') return;
+
+    const targets = await this.getSuccessorList(Math.max(0, this.replicationFactor - 1));
+    let content = null;
+
+    for (const target of targets) {
+      let needsPush = true;
+      try {
+        const remote = await this.rpc(
+          target, `/rpc/replicas?name=${encodeURIComponent(name)}&metaOnly=1`);
+        needsPush = remote.checksum !== meta.checksum;
+      } catch (error) {
+        needsPush = true; // sem réplica ainda, ou nó momentaneamente inacessível
+      }
+
+      if (!needsPush) continue;
+
+      try {
+        if (!content) content = await this.readLocal(name);
+        await this.rpc(target, '/rpc/replicas', {
+          method: 'PUT',
+          body: { name, ownerId: this.id, content: content.toString('base64') }
+        });
+      } catch (error) {
+        // Nó indisponível: tenta novamente no próximo ciclo de verificação.
+      }
+    }
+  }
+
+  async verifyReplicaFile(fileName) {
+    const name = validateFileName(fileName);
+    const meta = await this.readMeta(name);
+    if (!meta || meta.role !== 'replica') return;
+
+    const hashId = hashKey(name);
+    let owner;
+    try {
+      owner = await this.findSuccessor(hashId);
+    } catch (error) {
+      return; // não foi possível determinar o dono agora; tenta no próximo ciclo.
+    }
+
+    if (owner.id === this.id) {
+      // A topologia mudou: este nó passou a ser o dono do arquivo.
+      try {
+        const content = await this.readLocal(name);
+        await this.storeLocal(name, content, { role: 'owner', ownerId: this.id });
+        await this.replicateToSuccessors(name, content, this.id);
+      } catch (error) {
+        // Conteúdo local ausente/corrompido: nada a promover.
+      }
+      return;
+    }
+
+    const count = Math.max(0, this.replicationFactor - 1);
+    let targets = [];
+    try {
+      targets = count > 0 ? await this.getSuccessorList(count, owner) : [];
+    } catch (error) {
+      return; // dono inacessível no momento: mantém a réplica por ora.
+    }
+
+    const stillReplica = targets.some((candidate) => candidate.id === this.id);
+    if (!stillReplica) {
+      await this.removeLocal(name).catch(() => {});
+      return;
+    }
+
+    try {
+      const ownerInfo = await this.rpc(
+        owner, `/rpc/replicas?name=${encodeURIComponent(name)}&metaOnly=1`);
+      if (ownerInfo.checksum && ownerInfo.checksum !== meta.checksum) {
+        const fresh = await this.rpc(owner, `/rpc/files?name=${encodeURIComponent(name)}`);
+        const content = Buffer.from(fresh.content, 'base64');
+        await this.storeLocal(name, content, { role: 'replica', ownerId: owner.id });
+      }
+    } catch (error) {
+      // Dono inacessível ou arquivo ainda não propagado: tenta no próximo ciclo.
+    }
   }
 
   async addToCatalog(fileName) {
@@ -209,10 +432,17 @@ class ChordNode {
     });
   }
 
-  async storeLocal(fileName, content) {
+  /** Grava bytes localmente, junto do metadado de papel/dono/checksum. */
+  async storeLocal(fileName, content, { role = 'owner', ownerId = this.id } = {}) {
     const name = validateFileName(fileName);
     await fs.mkdir(this.storageDirectory, { recursive: true });
     await fs.writeFile(path.join(this.storageDirectory, name), content);
+    await this.writeMeta(name, {
+      role,
+      ownerId: Number(ownerId),
+      checksum: checksumOf(content),
+      updatedAt: new Date().toISOString()
+    });
   }
 
   async readLocal(fileName) {
@@ -227,6 +457,76 @@ class ChordNode {
       }
       throw error;
     }
+  }
+
+  async removeLocal(fileName) {
+    const name = validateFileName(fileName);
+    await fs.rm(path.join(this.storageDirectory, name), { force: true });
+    await this.deleteMeta(name);
+  }
+
+  /** Metadado (papel, dono, checksum) de um arquivo guardado localmente, com ou sem conteúdo. */
+  async getLocalFileInfo(fileName, { includeContent = true } = {}) {
+    const name = validateFileName(fileName);
+    const meta = await this.readMeta(name);
+    if (!meta) {
+      const notFound = new Error(`Arquivo "${name}" não encontrado localmente`);
+      notFound.code = 'ENOENT';
+      throw notFound;
+    }
+    const result = {
+      name,
+      role: meta.role,
+      ownerId: meta.ownerId,
+      checksum: meta.checksum,
+      updatedAt: meta.updatedAt
+    };
+    if (includeContent) {
+      result.content = (await this.readLocal(name)).toString('base64');
+    }
+    return result;
+  }
+
+  metaPathFor(name) {
+    return path.join(this.metaDirectory, `${name}.json`);
+  }
+
+  async writeMeta(name, meta) {
+    await fs.mkdir(this.metaDirectory, { recursive: true });
+    await fs.writeFile(this.metaPathFor(name), JSON.stringify(meta, null, 2));
+  }
+
+  async readMeta(name) {
+    try {
+      const raw = await fs.readFile(this.metaPathFor(name), 'utf8');
+      return JSON.parse(raw);
+    } catch (error) {
+      if (error.code === 'ENOENT') return null;
+      throw error;
+    }
+  }
+
+  async deleteMeta(name) {
+    await fs.rm(this.metaPathFor(name), { force: true });
+  }
+
+  /** Lista os metadados de todos os arquivos (donos e réplicas) guardados localmente. */
+  async listLocalMeta() {
+    let files;
+    try {
+      files = await fs.readdir(this.metaDirectory);
+    } catch (error) {
+      if (error.code === 'ENOENT') return [];
+      throw error;
+    }
+    const entries = [];
+    for (const file of files) {
+      if (!file.endsWith('.json')) continue;
+      const name = file.slice(0, -'.json'.length);
+      const meta = await this.readMeta(name);
+      if (meta) entries.push({ name, ...meta });
+    }
+    return entries;
   }
 
   assertJoined() {
@@ -252,15 +552,25 @@ class ChordNode {
     }
   }
 
-  state() {
+  async state() {
+    const files = await this.listLocalMeta().catch(() => []);
     return {
       node: this.reference,
       joined: this.joined,
       predecessor: this.predecessor,
       successor: this.successor,
-      fingerTable: this.fingers
+      fingerTable: this.fingers,
+      replicationFactor: this.replicationFactor,
+      files: files
+        .map(({ name, role, ownerId, checksum, updatedAt }) => (
+          { name, role, ownerId, checksum, updatedAt }))
+        .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))
     };
   }
+}
+
+function checksumOf(buffer) {
+  return crypto.createHash('sha256').update(buffer).digest('hex');
 }
 
 function validateFileName(fileName) {
