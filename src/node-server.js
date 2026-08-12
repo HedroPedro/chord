@@ -39,7 +39,7 @@ async function handleNodeRequest(node, request, response) {
       return sendFile(response, path.join(PUBLIC_DIRECTORY, file), contentType);
     }
     if (request.method === 'GET' && url.pathname === '/api/state') {
-      return json(response, 200, node.state());
+      return json(response, 200, await node.state());
     }
     if (request.method === 'POST' && url.pathname === '/api/files') {
       const body = await readJson(request);
@@ -74,6 +74,9 @@ async function handleNodeRequest(node, request, response) {
       node.predecessor = normalizeReference((await readJson(request)).node);
       return json(response, 200, { ok: true });
     }
+    if (request.method === 'GET' && url.pathname === '/rpc/successor') {
+      return json(response, 200, { node: node.successor });
+    }
     if (request.method === 'PUT' && url.pathname === '/rpc/successor') {
       node.successor = normalizeReference((await readJson(request)).node);
       return json(response, 200, { ok: true });
@@ -86,13 +89,31 @@ async function handleNodeRequest(node, request, response) {
     if (request.method === 'PUT' && url.pathname === '/rpc/files') {
       const body = await readJson(request);
       const content = Buffer.from(body.content || '', 'base64');
-      await node.storeLocal(body.name, content);
+      // Este nó é o dono do arquivo: grava localmente e propaga réplicas
+      // para os sucessores, igual ao que acontece em ChordNode#put.
+      await node.acceptOwnership(body.name, content);
       return json(response, 200, { ok: true, size: content.length });
     }
     if (request.method === 'GET' && url.pathname === '/rpc/files') {
       const name = url.searchParams.get('name');
       const content = await node.readLocal(name);
       return json(response, 200, { name, content: content.toString('base64') });
+    }
+    if (request.method === 'PUT' && url.pathname === '/rpc/replicas') {
+      const body = await readJson(request);
+      const content = Buffer.from(body.content || '', 'base64');
+      await node.storeLocal(body.name, content, { role: 'replica', ownerId: body.ownerId });
+      return json(response, 200, { ok: true, size: content.length });
+    }
+    if (request.method === 'GET' && url.pathname === '/rpc/replicas') {
+      const name = url.searchParams.get('name');
+      const metaOnly = url.searchParams.get('metaOnly') === '1';
+      return json(response, 200, await node.getLocalFileInfo(name, { includeContent: !metaOnly }));
+    }
+    if (request.method === 'DELETE' && url.pathname === '/rpc/replicas') {
+      const name = url.searchParams.get('name');
+      await node.removeLocal(name);
+      return json(response, 200, { ok: true });
     }
     return json(response, 404, { error: 'Rota não encontrada' });
   } catch (error) {

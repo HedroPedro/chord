@@ -23,9 +23,7 @@ const STATIC_FILES = {
     const stat = await fs.stat('data');
     if(stat)
       await fs.rm('data', {recursive: true});
-  } catch(err) {
-
-  }
+  } catch(err) {}
 })()
 
 const server = http.createServer(async (request, response) => {
@@ -37,7 +35,9 @@ const server = http.createServer(async (request, response) => {
       return sendFile(response, path.join(PUBLIC_DIRECTORY, file), contentType);
     }
     if (request.method === 'GET' && url.pathname === '/api/nodes') {
-      return json(response, 200, Array.from(nodes.values(), ({ node }) => node.state()));
+      const states = await Promise.all(
+        Array.from(nodes.values(), ({ node }) => node.state()));
+      return json(response, 200, states);
     }
     if (request.method === 'GET' && url.pathname === '/api/network') {
       const addresses = localIPv4Addresses();
@@ -62,12 +62,13 @@ const server = http.createServer(async (request, response) => {
       const running = await startNodeServer({
         id: body.id,
         host: body.host,
-        port
+        port,
+        replicationFactor: body.replicationFactor
       });
       try {
         await running.node.join(body.bootstrap || null);
         nodes.set(port, running);
-        return json(response, 201, running.node.state());
+        return json(response, 201, await running.node.state());
       } catch (error) {
         await running.close();
         throw error;
